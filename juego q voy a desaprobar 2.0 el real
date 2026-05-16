@@ -1,0 +1,126 @@
+import pygame
+import math
+import random
+import json
+import os
+
+
+ANCHO, ALTO = 800, 600
+FPS = 60
+pygame.init()
+ventana = pygame.display.set_mode((ANCHO, ALTO))
+reloj = pygame.time.Clock()
+fuente = pygame.font.SysFont("Courier New", 30)
+
+ARCHIVO_DATA = "partida.json"
+
+def cargar_datos():
+
+
+    if os.path.exists(ARCHIVO_DATA):
+        with open(ARCHIVO_DATA, "r") as f:
+            return json.load(f)
+    return {"max_bajas": 0, "max_puntos": 0}
+
+def guardar_datos(bajas_actuales, puntos_actuales):
+    datos = cargar_datos()
+    # Revisa si superaste el récord de bajas o de puntos
+    if bajas_actuales > datos["max_bajas"]:
+        datos["max_bajas"] = bajas_actuales
+    if puntos_actuales > datos["max_puntos"]:
+        datos["max_puntos"] = puntos_actuales
+    # Guarda la información estructurada en el archivo
+    with open(ARCHIVO_DATA, "w") as f:
+        json.dump(datos, f, indent=4)
+
+records = cargar_datos()
+jugador = pygame.Rect(ANCHO // 2, ALTO // 2, 40, 40)
+vida = 100
+puntos, bajas, ronda = 0, 0, 1
+balas = []
+zombies = []
+
+u_spawn = u_disparo = u_daño = 0
+ejecutando = True
+while ejecutando:
+    reloj.tick(FPS)
+    ahora = pygame.time.get_ticks()
+    ventana.fill((20, 20, 20))
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT:
+            ejecutando = False
+
+    t = pygame.key.get_pressed()
+    dx = (t[pygame.K_d] - t[pygame.K_a]) * 5
+    dy = (t[pygame.K_s] - t[pygame.K_w]) * 5
+    
+    # Limita al jugador dentro de la pantalla sin necesitar bloques de paredes
+    jugador.x = max(10, min(ANCHO - 50, jugador.x + dx))
+    jugador.y = max(10, min(ALTO - 50, jugador.y + dy))
+
+    if pygame.mouse.get_pressed()[0] and ahora - u_disparo > 150:
+        mx, my = pygame.mouse.get_pos()
+        ang = math.atan2(my - jugador.centery, mx - jugador.centerx)
+        balas.append({
+            "rect": pygame.Rect(jugador.centerx, jugador.centery, 8, 8),
+            "dx": math.cos(ang) * 14, "dy": math.sin(ang) * 14
+        })
+        u_disparo = ahora
+    if ahora - u_spawn > max(300, 2000 - (ronda * 150)):
+        zx = random.choice([10, ANCHO - 50])
+        zy = random.randint(10, ALTO - 50)
+        zombies.append(pygame.Rect(zx, zy, 35, 35))
+        u_spawn = ahora
+
+
+    for b in balas[:]:
+        b["rect"].x += b["dx"]
+        b["rect"].y += b["dy"]
+        
+        # Elimina la bala si sale de la pantalla
+        if not ventana.get_rect().contains(b["rect"]):
+            balas.remove(b)
+            continue
+        for z in zombies[:]:
+            if b["rect"].colliderect(z):
+                zombies.remove(z)
+                if b in balas:
+                    balas.remove(b)
+                puntos += 100
+                bajas += 1
+                if bajas % 10 == 0:
+                    ronda += 1
+                break
+
+    for z in zombies[:]:
+        ang_z = math.atan2(jugador.centery - z.centery, jugador.centerx - z.centerx)
+        z.x += math.cos(ang_z) * (1.5 + (ronda * 0.1))
+        z.y += math.sin(ang_z) * (1.5 + (ronda * 0.1))
+
+        if z.colliderect(jugador) and ahora - u_daño > 1000:
+            vida -= 25
+            u_daño = ahora
+            if vida <= 0:
+                guardar_datos(bajas, puntos) 
+                ejecutando = False
+
+
+    pygame.draw.rect(ventana, (40, 120, 120), (0, 0, ANCHO, ALTO), 5)
+    
+    for b in balas: 
+        pygame.draw.circle(ventana, (255, 255, 0), b["rect"].center, 4)
+    for z in zombies: 
+        pygame.draw.rect(ventana, (50, 150, 50), z)
+    pygame.draw.rect(ventana, (0, 120, 255), jugador)
+
+
+    ventana.blit(fuente.render(f"PUNTOS: {puntos} | MAX: {records['max_puntos']}", True, (255, 255, 255)), (30, 30))
+    ventana.blit(fuente.render(f"BAJAS: {bajas} | MAX: {records['max_bajas']}", True, (255, 255, 0)), (30, 65))
+    ventana.blit(fuente.render(f"RONDA: {ronda}", True, (0, 255, 255)), (30, 100))
+    
+    if vida > 0:
+        pygame.draw.rect(ventana, (200, 0, 0), (30, ALTO - 40, vida * 2, 15))
+
+    pygame.display.flip()
+
+pygame.quit()
