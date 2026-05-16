@@ -1,0 +1,140 @@
+import pygame
+import math
+import random
+import os
+
+ANCHO, ALTO = 800, 600
+FPS = 60
+pygame.init()
+ventana = pygame.display.set_mode((ANCHO, ALTO))
+reloj = pygame.time.Clock()
+fuente = pygame.font.SysFont("Impact", 30)
+
+def obtener_record():
+    if os.path.exists("record.txt"):
+        with open("record.txt", "r") as f:
+            return int(f.read().strip() or 0)
+    return 0
+
+def guardar_record(bajas):
+    if bajas > obtener_record():
+        with open("record.txt", "w") as f:
+            f.write(str(bajas))
+
+#armas y sus daños con cadencia y si es q no hay una imagen pone colores en vez del arma
+LISTA_ARMAS = ["M1911", "Comando", "Galil", "Ray gun"]
+ARMAS = {
+    "M1911":   {"daño": 15,  "cadencia": 400, "color": (255, 255, 0)},
+    "Comando": {"daño": 35,  "cadencia": 130, "color": (255, 255, 0)},
+    "Galil":   {"daño": 40,  "cadencia": 100, "color": (255, 255, 0)},
+    "Ray gun": {"daño": 200, "cadencia": 300, "color": (0, 255, 100)}
+}
+id_arma = 0
+
+# el mapa es solo un cuadrado
+grosor = 40
+paredes = [
+    pygame.Rect(0, 0, ANCHO, grosor), pygame.Rect(0, ALTO - grosor, ANCHO, grosor),
+    pygame.Rect(0, 0, grosor, ALTO), pygame.Rect(ANCHO - grosor, 0, grosor, ALTO)
+]
+
+# 
+jugador = pygame.Rect(ANCHO // 2, ALTO // 2, 40, 40)
+vida = 100
+puntos, ronda, bajas = 0, 1, 0
+zombies, balas = [], []
+u_spawn = u_disparo = u_daño = 0
+
+# --- BUCLE PRINCIPAL ---
+ejecutando = True
+while ejecutando:
+    reloj.tick(FPS)
+    ahora = pygame.time.get_ticks()
+    ventana.fill((20, 20, 20))
+
+    # --- 1. EVENTOS ---
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT: ejecutando = False
+        if e.type == pygame.KEYDOWN and e.key == pygame.K_q:
+            id_arma = (id_arma + 1) % len(LISTA_ARMAS)
+
+    arma = ARMAS[LISTA_ARMAS[id_arma]]
+
+    # --- 2. MOVIMIENTO JUGADOR ---
+    t = pygame.key.get_pressed()
+    dx, dy = (t[pygame.K_d] - t[pygame.K_a]) * 5, (t[pygame.K_s] - t[pygame.K_w]) * 5
+    
+    jugador.x += dx
+    for p in paredes:
+        if jugador.colliderect(p):
+            if dx > 0: jugador.right = p.left
+            if dx < 0: jugador.left = p.right
+            
+    jugador.y += dy
+    for p in paredes:
+        if jugador.colliderect(p):
+            if dy > 0: jugador.bottom = p.top
+            if dy < 0: jugador.top = p.bottom
+
+    # --- 3. DISPARO ---
+    if pygame.mouse.get_pressed()[0] and ahora - u_disparo > arma["cadencia"]:
+        mx, my = pygame.mouse.get_pos()
+        ang = math.atan2(my - jugador.centery, mx - jugador.centerx)
+        balas.append({
+            "rect": pygame.Rect(jugador.centerx, jugador.centery, 8, 8),
+            "dx": math.cos(ang) * 16, "dy": math.sin(ang) * 16,
+            "daño": arma["daño"], "color": arma["color"]
+        })
+        u_disparo = ahora
+
+    # --- 4. SPAWN ZOMBIES ---
+    if ahora - u_spawn > max(300, 2000 - (ronda * 150)):
+        zx = random.choice([grosor + 10, ANCHO - grosor - 40])
+        zy = random.randint(grosor + 10, ALTO - grosor - 40)
+        zombies.append({"rect": pygame.Rect(zx, zy, 35, 35), "vida": 40 + (ronda * 25)})
+        u_spawn = ahora
+
+    # --- 5. ACTUALIZAR BALAS Y COLISIONES ---
+    for b in balas[:]:
+        b["rect"].x += b["dx"]
+        b["rect"].y += b["dy"]
+        
+        if any(b["rect"].colliderect(p) for p in paredes):
+            balas.remove(b); continue
+
+        for z in zombies[:]:
+            if b["rect"].colliderect(z["rect"]):
+                z["vida"] -= b["daño"]
+                if b in balas: balas.remove(b)
+                if z["vida"] <= 0:
+                    zombies.remove(z)
+                    puntos += 100; bajas += 1
+                    if bajas % 10 == 0: ronda += 1
+                break
+
+    # --- 6. ACTUALIZAR ZOMBIES Y DAÑO ---
+    for z in zombies:
+        ang_z = math.atan2(jugador.centery - z["rect"].centery, jugador.centerx - z["rect"].centerx)
+        z["rect"].x += math.cos(ang_z) * (1.2 + (ronda * 0.1))
+        z["rect"].y += math.sin(ang_z) * (1.2 + (ronda * 0.1))
+
+        if z["rect"].colliderect(jugador) and ahora - u_daño > 1000:
+            vida -= 25; u_daño = ahora
+            if vida <= 0:
+                guardar_record(bajas)  # Guarda el récord antes de cerrar
+                ejecutando = False
+
+    # --- 7. DIBUJAR ---
+    for p in paredes: pygame.draw.rect(ventana, (60, 60, 70), p)
+    for b in balas: pygame.draw.circle(ventana, b["color"], b["rect"].center, 4)
+    for z in zombies: pygame.draw.rect(ventana, (50, 150, 50), z["rect"])
+    pygame.draw.rect(ventana, (0, 120, 255), jugador)
+
+    # HUD cada ": marca 
+    ventana.blit(fuente.render(f"PUNTOS: {puntos} | BAJAS: {bajas} | RÉCORD: {obtener_record()}", True, (255, 255, 255)), (60, 50))
+    ventana.blit(fuente.render(f"RONDA: {ronda} | ARMA (Q): {LISTA_ARMAS[id_arma]}", True, (255, 255, 0)), (60, 90))
+    pygame.draw.rect(ventana, (200, 0, 0), (60, ALTO - 45, vida * 1.5, 15))
+
+    pygame.display.flip()
+
+pygame.quit()
